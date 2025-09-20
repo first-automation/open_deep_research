@@ -1,6 +1,7 @@
 """Main LangGraph implementation for the Deep Research agent."""
 
 import asyncio
+import re
 from typing import Literal
 
 from langchain.chat_models import init_chat_model
@@ -50,6 +51,7 @@ from open_deep_research.utils import (
     openai_websearch_called,
     remove_up_to_last_ai_message,
     think_tool,
+    extract_page_images,
 )
 
 # Initialize a configurable model that we will use throughout the agent
@@ -533,14 +535,59 @@ async def compress_research(state: ResearcherState, config: RunnableConfig):
     
     # Step 2: Prepare messages for compression
     researcher_messages = state.get("researcher_messages", [])
-    
-    # Add instruction to switch from research mode to compression mode
-    researcher_messages.append(HumanMessage(content=compress_research_simple_human_message))
-    
+
+    # --- Auto image collection fallback -----------------------------------
+    # 研究中に extract_page_images が呼ばれておらず、かつ検索結果の URL がある場合、
+    # ここで自動的に画像候補を収集して ToolMessage を追加します。
+    try:
+        if configurable.embed_images_in_report:
+            # 既に画像候補があるか？
+            has_extract_images_tool = any(
+                getattr(m, "name", None) == "extract_page_images"
+                for m in filter_messages(researcher_messages, include_types=["tool"])
+            )
+            joined_text = "\n".join([str(m.content) for m in researcher_messages])
+            has_candidates_section = "### Image Candidates" in joined_text
+
+            if not has_extract_images_tool and not has_candidates_section:
+                # Tavily 検索結果の "URL: ..." 行からページ URL を抽出
+                url_pat = re.compile(r"URL:\s*(https?://\S+)", re.IGNORECASE)
+                page_urls: list[str] = []
+                for m in filter_messages(researcher_messages, include_types=["tool", "ai"]):
+                    for u in url_pat.findall(str(m.content)):
+                        # 直接画像 URL は弾く
+                        if any(u.lower().endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg")):
+                            continue
+                        page_urls.append(u)
+                # 重複除去 & ページ数を設定に合わせて制限
+                seen: set[str] = set()
+                deduped = []
+                for u in page_urls:
+                    if u not in seen:
+                        seen.add(u)
+                        deduped.append(u)
+                if deduped:
+                    max_pages = max(1, configurable.max_images_total // max(1, configurable.max_images_per_source))
+                    candidate_urls = deduped[:max_pages]
+                    img_text = await extract_page_images.ainvoke(
+                        {"urls": candidate_urls, "max_per_source": configurable.max_images_per_source},
+                        config
+                    )
+                    researcher_messages.append(
+                        ToolMessage(
+                            content=img_text,
+                            name="extract_page_images",
+                            tool_call_id="auto_extract_page_images"
+                        )
+                    )
+    except Exception:
+        # ベストエフォート。ここで失敗しても圧縮自体は継続。
+        pass
+
     # Step 3: Attempt compression with retry logic for token limit issues
     synthesis_attempts = 0
     max_attempts = 3
-    
+
     while synthesis_attempts < max_attempts:
         try:
             # Create system prompt focused on compression task

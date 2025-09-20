@@ -2,7 +2,7 @@
 
 import os
 from enum import Enum
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Literal
 
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
@@ -209,6 +209,54 @@ class Configuration(BaseModel):
                 "description": "Maximum output tokens for final report model"
             }
         }
+    )
+    image_extract_depth: Literal["basic", "advanced"] = Field(
+        default="basic",
+        metadata={
+            "x_oap_ui_config": {
+                "type": "select",
+                "default": "basic",
+                "description": "Depth for Tavily extract when collecting images",
+                "options": [
+                    {"label": "Basic", "value": "basic"},
+                    {"label": "Advanced", "value": "advanced"},
+                ],
+            }
+        },
+    )
+    embed_images_in_report: bool = Field(
+        default=True,
+        metadata={
+            "x_oap_ui_config": {
+                "type": "boolean",
+                "default": True,
+                "description": "If true, the final report will embed images inline using Markdown",
+            }
+        },
+    )
+    max_images_per_source: int = Field(
+        default=4,
+        metadata={
+            "x_oap_ui_config": {
+                "type": "number",
+                "default": 4,
+                "min": 1,
+                "max": 10,
+                "description": "Maximum images to extract per page when calling extract_page_images",
+            }
+        },
+    )
+    max_images_total: int = Field(
+        default=8,
+        metadata={
+            "x_oap_ui_config": {
+                "type": "number",
+                "default": 8,
+                "min": 1,
+                "max": 24,
+                "description": "Soft cap for total images to embed in the final report",
+            }
+        },
     )
     # MCP server configuration
     mcp_config: Optional[MCPConfig] = Field(

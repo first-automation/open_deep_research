@@ -524,6 +524,78 @@ async def load_mcp_tools(
     return configured_tools
 
 
+async def tavily_extract_images_async(
+    urls: List[str],
+    extract_depth: Literal["basic", "advanced"] = "basic",
+    include_favicon: bool = False,
+    config: RunnableConfig = None
+) -> dict[str, list[dict]]:
+    """各URLのページ内画像を Tavily Extract で取得し、正規化して返す。"""
+    tavily_client = AsyncTavilyClient(api_key=get_tavily_api_key(config))
+    try:
+        resp = await tavily_client.extract(
+            urls=urls,
+            include_images=True,
+            extract_depth=extract_depth,
+            include_favicon=include_favicon,
+        )
+    except Exception as e:
+        # APIキー未設定などでも、安全に空を返す
+        logging.warning(f"Tavily Extract failed: {e}")
+        return {}
+
+    def _norm(items):
+        out = []
+        for im in items or []:
+            if isinstance(im, str):
+                out.append({"url": im, "description": None})
+            elif isinstance(im, dict):
+                url = im.get("url") or im.get("src") or im.get("image_url") or im.get("contentUrl")
+                desc = im.get("description") or im.get("alt") or im.get("title")
+                if url:
+                    out.append({"url": url, "description": desc})
+        return out
+
+    image_map: dict[str, list[dict]] = {}
+    for r in (resp or {}).get("results", []):
+        image_map[r.get("url")] = _norm(r.get("images") or [])
+    return image_map
+
+
+@tool(description="Extract up to N image URLs from given web pages (uses Tavily Extract) and return a normalized `### Image Candidates` block.")
+async def extract_page_images(
+    urls: List[str],
+    max_per_source: int = 4,
+    config: RunnableConfig = None
+) -> str:
+    """指定URL群から画像URLを抽出し、`### Image Candidates` の規格化ブロックで返す。"""
+    configurable = Configuration.from_runnable_config(config)
+    image_map = await tavily_extract_images_async(
+        urls=urls,
+        extract_depth=configurable.image_extract_depth,
+        config=config,
+    )
+    if not image_map:
+        return "No images found or Tavily Extract not available. Make sure TAVILY_API_KEY is set."
+
+    lines = []
+    lines.append("### Image Candidates")
+    lines.append("")
+    for u in urls:
+        items = (image_map.get(u) or [])[:max_per_source]
+        lines.append(f"* Source: {u}")
+        lines.append("")
+        if not items:
+            lines.append("  - (none)")
+        else:
+            for i, im in enumerate(items, 1):
+                label = im.get("description") or f"image_{i}"
+                lines.append(f"  * ALT: {label}")
+                lines.append(f"    IMG: {im['url']}")
+        lines.append("")
+    return "\n".join(lines)
+
+
 ##########################
 # Tool Utils
 ##########################
@@ -576,7 +648,7 @@ async def get_all_tools(config: RunnableConfig):
         List of all configured and available tools for research operations
     """
     # Start with core research tools
-    tools = [tool(ResearchComplete), think_tool]
+    tools = [tool(ResearchComplete), think_tool, extract_page_images]
     
     # Add configured search tools
     configurable = Configuration.from_runnable_config(config)

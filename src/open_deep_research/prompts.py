@@ -143,9 +143,10 @@ You can use any of the tools provided to you to find resources that can help ans
 </Task>
 
 <Available Tools>
-You have access to two main tools:
+You have access to three main tools:
 1. **tavily_search**: For conducting web searches to gather information
 2. **think_tool**: For reflection and strategic planning during research
+3. **extract_page_images**: Given URLs, extract page-internal image links (use after you have candidate sources)
 {mcp_prompt}
 
 **CRITICAL: Use think_tool after each search to reflect on results and plan next steps. Do not call think_tool with the tavily_search or any other tools. It should be to reflect on the results of the search.**
@@ -160,6 +161,36 @@ Think like a human researcher with limited time. Follow these steps:
 4. **Execute narrower searches as you gather information** - Fill in the gaps
 5. **Stop when you can answer confidently** - Don't keep searching for perfection
 </Instructions>
+
+<Image Guidance>
+If the topic would benefit from visuals (people, products, places, maps, charts, logos, screenshots, UI, or physical artifacts), you MUST collect images **once you have 3–6 high-value pages**:
+
+- Call **extract_page_images** in a single batch with those page URLs (set `max_per_source` to 2–4).
+- Prefer images that directly illustrate important claims; skip favicons, tiny thumbnails, sprites, trackers, or decorative stock imagery.
+- After the tool returns, **keep the raw output** and also rewrite a normalized block titled **"### Image Candidates"** (do not discard any usable image). Use this exact structure:
+
+```
+
+### Image Candidates
+
+* Source: <page URL>
+
+  * ALT: \<short caption or the 'label' from the tool>
+    IMG: <direct image URL>
+  * ALT: <...>
+    IMG: <...>
+* Source: <another page URL>
+
+  * ALT: <...>
+    IMG: <...>
+
+```
+
+- The **ALT** should be a concise, descriptive caption (≤ 120 chars). If the tool returned a label/alt, reuse it; otherwise write a neutral description.
+- If no useful images are found, write: `### Image Candidates\n- (none)`.
+
+**Do not drop image URLs** — later steps rely on them to embed figures in the final report.
+</Image Guidance>
 
 <Hard Limits>
 **Tool Call Budgets** (Prevent excessive searching):
@@ -200,12 +231,43 @@ Only these fully comprehensive cleaned findings are going to be returned to the 
 4. You should include a "Sources" section at the end of the report that lists all of the sources the researcher found with corresponding citations, cited against statements in the report.
 5. Make sure to include ALL of the sources that the researcher gathered in the report, and how they were used to answer the question!
 6. It's really important not to lose any sources. A later LLM will be used to merge this report with others, so having all of the sources is critical.
+7. **Image Preservation**: If any **"Image Candidates"** exist or if the **extract_page_images** tool output appears anywhere, you MUST:
+   - Keep ALL usable image URLs.
+   - Normalize into a dedicated section **exactly titled `### Image Candidates`** using this structure:
+
+```
+
+### Image Candidates
+
+* Source: <page URL>
+
+  * ALT: <caption>
+    IMG: <direct image URL>
+  * ALT: <caption>
+    IMG: <direct image URL>
+
+```
+
+   - After the candidates, add a second section **`### Recommended Figures`** mapping up to 8 best images to a short reason and the source citation number (the citation number is for the **page URL**, not the raw image URL):
+
+```
+
+### Recommended Figures
+
+* Figure 1: <ALT> — IMG: <direct image URL> — Source \[n] — Reason: <why this supports the text>
+* Figure 2: <ALT> — IMG: <direct image URL> — Source \[m] — Reason: <...>
+
+```
+
+   - If there are no images, include: `### Image Candidates\n- (none)`.
 </Guidelines>
 
 <Output Format>
 The report should be structured like this:
 **List of Queries and Tool Calls Made**
 **Fully Comprehensive Findings**
+**### Image Candidates**           <-- if any; MUST use the exact header
+**### Recommended Figures**        <-- if any
 **List of All Relevant Sources (with citations in the report)**
 </Output Format>
 
@@ -251,6 +313,39 @@ Please create a detailed answer to the overall research brief that:
 3. References relevant sources using [Title](URL) format
 4. Provides a balanced, thorough analysis. Be as comprehensive as possible, and include all information that is relevant to the overall research question. People are using you for deep research and will expect detailed, comprehensive answers.
 5. Includes a "Sources" section at the end with all referenced links
+
+<Image Embedding Rules>
+If the Findings contain a section **exactly titled `### Image Candidates`** and/or `### Recommended Figures`, you MUST embed relevant images into the body of the report using Markdown image syntax:
+
+- Use this format **in the relevant section** near the claim the image supports:
+
+```
+
+![ALT](IMG_URL)
+*Figure N. ALT* — Source \[k]
+
+```
+
+  - **ALT**: concise descriptive caption (≤ 120 chars).
+  - **IMG_URL**: the **direct image URL** from Image Candidates.
+  - **[k]**: the citation number for the **page URL** that hosts the image (from the Sources list). If that page is not yet in Sources, add it.
+
+- Embed **up to 6–8 figures total** and **at most 2 per source page**, prioritizing:
+  1) uniqueness and clarity, 2) direct support to important claims, 3) adequate resolution.
+- Avoid embedding favicons, tiny thumbnails, sprites, or decorative stock photos.
+- After embedding images inline, also add a **`### Figures`** section at the end with a numbered list repeating each figure’s caption and image URL for easy access:
+
+```
+
+### Figures
+
+1. ALT — IMG: <direct image URL> — Source \[k]
+2. ALT — IMG: <direct image URL> — Source \[m]
+
+```
+
+- If the rendering environment doesn’t show images, readers will still see the URLs and captions. If no suitable images exist, omit all figure blocks.
+</Image Embedding Rules>
 
 You can structure your report in a number of different ways. Here are some examples:
 
